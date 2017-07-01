@@ -14,6 +14,9 @@ import calendar
 import time
 import sqlite3
 import configparser
+from bs4 import BeautifulSoup
+from random import randint
+
 
 class DatabaseHandler:
 	def __init__(self, db_name, callback):
@@ -204,6 +207,16 @@ class FunctionsHolder:  # :v
 			cool_text = "api.sunrise-sunset.org zwróciło zły status - "+jsn['status']
 		self.send_line(cool_text, thread_id, thread_type)	
 
+	def modlitwa(self, thread_id, thread_type):
+		url = "http://www.biblia.deon.pl/otworz.php?skrot=Ps "
+		cyferka = str(randint(1, 150))
+		r = requests.get(url+cyferka)
+		r.encoding = 'iso-8859-2'
+		r= r.text
+		soup = BeautifulSoup(r)
+		div = soup.find("div", {"class": "tresc"})
+		self.send_line(div.text, thread_id, thread_type)
+
 	def change_color(self, message, thread_id, thread_type):
 		split = message.split(' ')
 		if len(split) >= 2:
@@ -221,6 +234,15 @@ class FunctionsHolder:  # :v
 			QueueEvent(self.callback, CustomClient.change_color, EksDee.col, thread_id)
 		)
 
+	def help(self, thread_id, thread_type, parser):
+		dic = parser.commands_dict
+		ret_str = "["
+		for komenda in dic:
+			ret_str += '/'.join(komenda[0])+'] '
+			if komenda[1]: ret_str += '[Adm] '
+			ret_str += " - " + komenda[2] + "\n["
+		ret_str = ret_str[:-1]
+		self.send_line(ret_str, thread_id, thread_type)
 
 	def send_multiline(self, text_array, thread_id, thread_type):
 		for line in text_array:
@@ -315,8 +337,67 @@ class MessageParser:
 				command = _t[0]
 		if not command: return
 
+		self.commands_dict = [
+			#[
+			#	['.end', '.quit', 'exit'],
+			#	1,
+			#	"Wyłącza bota.",
+			#	self.functions_holder.exit_bot,
+			#	(thread_id, thread_type)
+			#],
+			[
+				['.burze', '.burza'],
+				0,
+				"Pokazuje stan burz w Polsce (burze.dzis.net).",
+				self.functions_holder.burze_polska,
+				(thread_id, thread_type)
+			],
+			[
+				['.pogoda', '.meteogram'],
+				0,
+				"Pokazuje meteogram z Wronek (meteo.pl).",
+				self.functions_holder.meteogram,
+				(thread_id, thread_type)
+			],
+			[
+				['.color', '.kolor'],
+				0,
+				"Zmienia kolor konwersacji, np. .kolor #1AB3F5",
+				self.functions_holder.change_color,
+				(message, thread_id, thread_type)
+			],
+			[
+				['.dzien', '.dzień', '.pory', '.fazy', '.goldenhour', '.wschód', '.wschod', '.zachod', '.zachód'],
+				0,
+				"Pokazuje pory obecnego dnia.",
+				self.functions_holder.pory_dnia,
+				(thread_id, thread_type)
+			],
+			[
+				['.help', '.komendy', '.pomoc', '.halp', '.?'],
+				0,
+				"Pokazuje listę komend.",
+				self.functions_holder.help,
+				(thread_id, thread_type, self)
+			],
+			[
+				['.modlitwa', '.deusvult', '.avemaria', '.maria', '.jezus', '.jesus', '.psalm', '.psalmy', '.biblia'],
+				0,
+				"Losowa modlitwa.",
+				self.functions_holder.modlitwa,
+				(thread_id, thread_type)
+			]
+		]
+
+		for com in self.commands_dict:
+			if command.lower() in com[0]:
+				if com[1] and not owner_sent:
+					return
+				threading.Thread(target=com[3], args=com[4]).start()
+		
 		if command in ('.end', '.quit', '.exit') and owner_sent:
 			self.functions_holder.exit_bot(thread_id, thread_type)
+		"""
 		if command == '.burze':
 			threading.Thread(target=self.functions_holder.burze_polska, args=(thread_id, thread_type)).start()
 		if command in ('.pogoda', '.meteogram'):
@@ -325,6 +406,7 @@ class MessageParser:
 			threading.Thread(target=self.functions_holder.change_color, args=(message, thread_id, thread_type)).start()
 		if command in ('.dzien', '.dzień', '.pory', '.fazy', '.goldenhour', '.wschód', '.wschod', '.zachod', '.zachód'):
 			threading.Thread(target=self.functions_holder.pory_dnia, args=(thread_id, thread_type)).start()
+		"""
 
 	def parse_image(self, filename, url, height, width, author_id, thread_id, thread_type, metadata, ts):
 		"""cool_text = 'Wysłano obrazek przez '+str(author_id)+' do '+str(thread_id)+'.\n'
@@ -461,7 +543,11 @@ class CustomClient(Client):
 
 		self.queue_thread.start()
 		self.db_thread.start()
-		self.listen()
+		while True:
+			try:
+				self.listen()
+			except:
+				print("Error in run loop!")
 
 	def onMessage(self, message, author_id, thread_id, thread_type, ts, metadata, msg, **kwargs):
 		self_sent = str(author_id) == self.id
