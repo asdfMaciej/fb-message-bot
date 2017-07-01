@@ -25,3 +25,7 @@ bot_id=the bot's id, a long numerical int. Get it by going into conversation wit
 owner_ids=The owners' ids, seperated by commas. 
 
 The commands are listed [atm] in MessageParser - around 320 lines mark.
+
+# Things
+
+If your facebook keeps crying about authentication every time you try to log in on your VPS, then use elinks and log in through console. Works.
