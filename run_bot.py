@@ -169,7 +169,7 @@ class FunctionsHolder:  # :v
 		print(url_pl)
 		txt = 'Meteogram dla stacji Wronki (meteo.pl): '
 		img = requests.get(url_pl)
-		with open('temp/obrazek.png', 'wb') as f:
+		with open('temp/obrazek.png', 'wb+') as f:
 			if r.status_code == 200:
 				for chunk in img:
 					f.write(chunk)
