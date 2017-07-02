@@ -21,6 +21,7 @@ db_save_delay=5
 [Other]    
 debug=1    
 db_name=logs/logs.db    
+commands_folder=commands    
 bot_id=the bot's id, a long numerical int. Get it by going into conversation with his account and copying from url.
 owner_ids=The owners' ids, seperated by commas. 
 
