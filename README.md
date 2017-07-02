@@ -25,7 +25,7 @@ commands_folder=commands
 bot_id=the bot's id, a long numerical int. Get it by going into conversation with his account and copying from url.
 owner_ids=The owners' ids, seperated by commas. 
 
-The commands are listed [atm] in MessageParser - around 320 lines mark.
+It's quite easy to make your own commands - just base on the example ones.
 
 # Things
 
