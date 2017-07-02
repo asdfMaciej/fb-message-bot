@@ -2,6 +2,7 @@ from fbchat import Client
 from fbchat.models import *
 from datetime import datetime
 from dateutil import tz
+from importlib import import_module
 import time
 import enum
 import sys
@@ -14,6 +15,7 @@ import calendar
 import time
 import sqlite3
 import configparser
+import os
 from bs4 import BeautifulSoup
 from random import randint
 
@@ -155,107 +157,40 @@ class FunctionsHolder:  # :v
 	def __init__(self, callback, parser):
 		self.callback = callback
 		self.parser = parser
+		self.folder = self.callback.commands_folder
+		self.init_commands(self.folder)
 
-	def burze_polska(self, thread_id, thread_type):
-		url_pl = 'http://burze.dzis.net/burze.gif'
-		txt = 'Aktualny stan burz w Polsce (burze.dzis.net):'
-		self.callback.queue.append(
-			QueueEvent(self.callback, CustomClient.send_image_remote, url_pl, txt, thread_id, thread_type)
-		)
-
-	def meteogram(self, thread_id, thread_type):
-		url_pl = 'http://www.meteo.pl/um/metco/mgram_pict.php?ntype=0u&fdate={}&row=391&col=171&lang=pl'
-		url_meteogram = 'http://new.meteo.pl/um/php/meteorogram_id_um.php?ntype=0u&id=2658'
-		r = requests.get(url_meteogram)
-		data = r.text.split('var fcstdate = "')[1].split('";')[0]
-		url_pl = url_pl.format(data)
-		print(url_pl)
-		txt = 'Meteogram dla stacji Wronki (meteo.pl): '
-		img = requests.get(url_pl)
-		with open('temp/obrazek.png', 'wb+') as f:
-			if r.status_code == 200:
-				for chunk in img:
-					f.write(chunk)
-		self.callback.queue.append(
-			QueueEvent(self.callback, CustomClient.send_image_local, 'temp/obrazek.png', txt, thread_id, thread_type)
-		)
-
-	def pory_dnia(self, thread_id, thread_type):
-		def tt(old):
-			from_zone = tz.tzutc()
-			retarded = datetime.now().strftime('%Y%m%d')
-			time_tuple = datetime.strptime(old+retarded, "%I:%M:%S %p%Y%m%d").replace(tzinfo=from_zone)
-			time_tuple = time_tuple.astimezone(tz=None)
-			return time_tuple.strftime("%H:%M:%S")
-
-		url_api = 'https://api.sunrise-sunset.org/json?lat=52.7145775&lng=16.3705298&date=today'
-		r = requests.get(url_api).text
-		jsn = json.loads(r)
-		if jsn['status'] == 'OK':
-			dlugosc_dnia = jsn['results']['day_length']
-			cool_text = "Długość dzisiejszego dnia wynosi: "+dlugosc_dnia+".\n"
-			cool_text += "Świt astronomiczny: " + tt(jsn['results']['astronomical_twilight_begin'])+".\n"
-			cool_text += "Świt żeglarski: " + tt(jsn['results']['nautical_twilight_begin'])+".\n"
-			cool_text += "Świt cywilny: " + tt(jsn['results']['civil_twilight_begin'])+".\n"
-			cool_text += "Wschód: " + tt(jsn['results']['sunrise'])+".\n"
-			cool_text += "Południe astronomiczne: " + tt(jsn['results']['solar_noon'])+".\n"
-			cool_text += "Zachód: " + tt(jsn['results']['sunset'])+".\n"
-			cool_text += "Zmierzch cywilny: " + tt(jsn['results']['civil_twilight_end'])+".\n"
-			cool_text += "Zmierzch żeglarski: " + tt(jsn['results']['nautical_twilight_end'])+".\n"
-			cool_text += "Zmierzch astronomiczny: " + tt(jsn['results']['astronomical_twilight_end'])+"."
-		else:
-			cool_text = "api.sunrise-sunset.org zwróciło zły status - "+jsn['status']
-		self.send_line(cool_text, thread_id, thread_type)	
-
-	def modlitwa(self, thread_id, thread_type):
-		url = "http://www.biblia.deon.pl/otworz.php?skrot=Ps "
-		cyferka = str(randint(1, 150))
-		r = requests.get(url+cyferka)
-		r.encoding = 'iso-8859-2'
-		r= r.text
-		soup = BeautifulSoup(r)
-		div = soup.find("div", {"class": "tresc"})
-		self.send_line(div.text, thread_id, thread_type)
-
-	def change_color(self, message, thread_id, thread_type):
-		split = message.split(' ')
-		if len(split) >= 2:
-			color = split[1]
-		else:
-			self.send_line('Należy zastosować komendę w formacie .kolor <kolor>!', thread_id, thread_type)
+	def init_commands(self, folder):
+		self.commands = []
+		listdir_ret = os.listdir(folder)
+		if not listdir_ret:
+			print("[!] No commands found in "+folder)
 			return
-		pattern = re.compile("^#(?:[0-9a-fA-F]{3}){2}$")
-		if not pattern.match(color):
-			self.send_line('Kolor musi być w formacie heksadecymalnym! (np. #AA13F8)', thread_id, thread_type)
-			return
-		class EksDee(Enum):
-			col = color
-		self.callback.queue.append(
-			QueueEvent(self.callback, CustomClient.change_color, EksDee.col, thread_id)
-		)
+		files = []
+		for f in listdir_ret:
+			if '.py' in f and f != '__init__.py': files.append(f.split('.')[0])
+		for f in files:
+			module = import_module(folder+'.'+f)
+			self.commands.append([
+				module.Command.command_names,
+				module.Command.admin_only,
+				module.Command.description,
+				module.Command.run
+			])
+			print("[*] Imported: "+folder+'.'+f)
 
-	def help(self, thread_id, thread_type, parser):
-		dic = parser.commands_dict
-		ret_str = "["
-		for komenda in dic:
-			ret_str += '/'.join(komenda[0])+'] '
-			if komenda[1]: ret_str += '[Adm] '
-			ret_str += " - " + komenda[2] + "\n["
-		ret_str = ret_str[:-1]
-		self.send_line(ret_str, thread_id, thread_type)
-
-	def send_multiline(self, text_array, thread_id, thread_type):
+	def _send_multiline(self, text_array, thread_id, thread_type):
 		for line in text_array:
 			self.callback.queue.append(
 				QueueEvent(self.callback, CustomClient.send_text, line, thread_id, thread_type)
 			)
 
-	def send_line(self, text, thread_id, thread_type):
+	def _send_line(self, text, thread_id, thread_type):
 		self.callback.queue.append(
 			QueueEvent(self.callback, CustomClient.send_text, text, thread_id, thread_type)
 		)
 
-	def exit_bot(self, thread_id, thread_type):
+	def _exit_bot(self, thread_id, thread_type):
 		self.callback.sendMessage('K', thread_id=thread_id, thread_type=thread_type)
 		self.callback.logout()
 		sys.exit()
@@ -337,102 +272,34 @@ class MessageParser:
 				command = _t[0]
 		if not command: return
 
-		self.commands_dict = [
-			#[
-			#	['.end', '.quit', 'exit'],
-			#	1,
-			#	"Wyłącza bota.",
-			#	self.functions_holder.exit_bot,
-			#	(thread_id, thread_type)
-			#],
-			[
-				['.burze', '.burza'],
-				0,
-				"Pokazuje stan burz w Polsce (burze.dzis.net).",
-				self.functions_holder.burze_polska,
-				(thread_id, thread_type)
-			],
-			[
-				['.pogoda', '.meteogram'],
-				0,
-				"Pokazuje meteogram z Wronek (meteo.pl).",
-				self.functions_holder.meteogram,
-				(thread_id, thread_type)
-			],
-			[
-				['.color', '.kolor'],
-				0,
-				"Zmienia kolor konwersacji, np. .kolor #1AB3F5",
-				self.functions_holder.change_color,
-				(message, thread_id, thread_type)
-			],
-			[
-				['.dzien', '.dzień', '.pory', '.fazy', '.goldenhour', '.wschód', '.wschod', '.zachod', '.zachód'],
-				0,
-				"Pokazuje pory obecnego dnia.",
-				self.functions_holder.pory_dnia,
-				(thread_id, thread_type)
-			],
-			[
-				['.help', '.komendy', '.pomoc', '.halp', '.?'],
-				0,
-				"Pokazuje listę komend.",
-				self.functions_holder.help,
-				(thread_id, thread_type, self)
-			],
-			[
-				['.modlitwa', '.deusvult', '.avemaria', '.maria', '.jezus', '.jesus', '.psalm', '.psalmy', '.biblia'],
-				0,
-				"Losowa modlitwa.",
-				self.functions_holder.modlitwa,
-				(thread_id, thread_type)
-			]
-		]
-
-		for com in self.commands_dict:
+		params_d = {
+			'callback': self.callback,
+			'functions_holder': self.functions_holder,
+			'message': message,
+			'author_id': author_id,
+			'thread_id': thread_id,
+			'thread_type': thread_type,
+			'ts': ts,
+			'metadata': metadata,
+			'msg': msg
+		}
+		for com in self.functions_holder.commands:
 			if command.lower() in com[0]:
 				if com[1] and not owner_sent:
 					return
-				threading.Thread(target=com[3], args=com[4]).start()
+				threading.Thread(target=com[3], args=(None, params_d)).start()
 		
 		if command in ('.end', '.quit', '.exit') and owner_sent:
-			self.functions_holder.exit_bot(thread_id, thread_type)
-		"""
-		if command == '.burze':
-			threading.Thread(target=self.functions_holder.burze_polska, args=(thread_id, thread_type)).start()
-		if command in ('.pogoda', '.meteogram'):
-			threading.Thread(target=self.functions_holder.meteogram, args=(thread_id, thread_type)).start()
-		if command in ('.color', '.kolor'):
-			threading.Thread(target=self.functions_holder.change_color, args=(message, thread_id, thread_type)).start()
-		if command in ('.dzien', '.dzień', '.pory', '.fazy', '.goldenhour', '.wschód', '.wschod', '.zachod', '.zachód'):
-			threading.Thread(target=self.functions_holder.pory_dnia, args=(thread_id, thread_type)).start()
-		"""
+			self.functions_holder._exit_bot(thread_id, thread_type)
 
 	def parse_image(self, filename, url, height, width, author_id, thread_id, thread_type, metadata, ts):
-		"""cool_text = 'Wysłano obrazek przez '+str(author_id)+' do '+str(thread_id)+'.\n'
-		cool_text += 'Wymiary: ['+str(width)+'*'+str(height)+'], filename: '+filename+'.\n'
-		source_msg = ''
-		for tag in metadata['tags']:
-			if 'source:' in tag: source_msg = tag
-		komorka = 'komórki' if source_msg in ('source:chat:orca', 'source:titan:orca', 'source:titan:m_zero') else 'komputera'
-		cool_text += 'Zdjęcie wysłano z '+komorka+' - metadata wskazuje na '+source_msg
-		self.functions_holder.send_line(cool_text, thread_id, thread_type)"""
 		pass
 
 	def parse_sticker(self, stickerID, url, author_id, thread_id, thread_type, metadata, msg, ts):
-		"""cool_text = 'Wysłano naklejkę przez '+str(author_id)+' do '+str(thread_id)+'.\n'
-		cool_text = 'ID naklejki to '+str(stickerID)+'. URL - '+url+'\n'
-		for tag in metadata['tags']:
-			if 'source:' in tag: source_msg = tag
-		komorka = 'komórki' if source_msg in ('source:chat:orca', 'source:titan:orca', 'source:titan:m_zero') else 'komputera'
-		cool_text += 'Naklejkę wysłano z '+komorka+' - metadata wskazuje na '+source_msg
-		self.functions_holder.send_line(cool_text, thread_id, thread_type)"""
 		pass
 
 	def parse_video(self, name, url, previewIMG, height, width, length, type, rotation, 
 					author_id, thread_id, thread_type, metadata, msg, ts):
-		"""cool_text = 'Wysłano film, ale jest tyle zmiennych że nie chce mi sie przetwarzac.'
-		self.functions_holder.send_line(cool_text, thread_id, thread_type)"""
 		pass
 
 class Logger:
@@ -512,7 +379,7 @@ class QueueHandler:
 			if self.callback.queue:
 				element = self.callback.queue.pop(0)
 				element.execute()
-				print('Executed element!')
+				if self.callback.debug: print('Executed element!')
 			time.sleep(self.callback.queue_delay)
 
 class ConfigReader:
@@ -530,6 +397,7 @@ class CustomClient(Client):
 		self.queue_delay = float(config_dict['Delays']['queue_delay'])  # in seconds
 		self.db_save_delay = float(config_dict['Delays']['db_save_delay'])
 		self.db_name = str(config_dict['Other']['db_name'])
+		self.commands_folder = str(config_dict['Other']['commands_folder'])
 		self.debug = int(config_dict['Other']['debug'])
 		self.id = str(config_dict['Other']['bot_id'])
 		self.owner_ids = str(config_dict['Other']['owner_ids']).split(',')
@@ -546,7 +414,7 @@ class CustomClient(Client):
 		while True:
 			try:
 				self.listen()
-			except:
+			except Exception:
 				print("Error in run loop!")
 
 	def onMessage(self, message, author_id, thread_id, thread_type, ts, metadata, msg, **kwargs):
@@ -571,16 +439,17 @@ class CustomClient(Client):
 	def change_color(self, color, thread_id):
 		self.changeThreadColor(color, thread_id=thread_id)
 
-cr = ConfigReader('config.ini')
-d = cr.get_dict()
-client = CustomClient(d['Credentials']['email'], d['Credentials']['password'])
-client.initialize(d)
+if __name__ == "__main__":
+	cr = ConfigReader('config.ini')
+	d = cr.get_dict()
+	client = CustomClient(d['Credentials']['email'], d['Credentials']['password'])
+	client.initialize(d)
 
-try:
-	client.run()
-except (KeyboardInterrupt, SystemExit):
-	client.logout()
-	client.queue_handler.killed = True
-	client.logger.database_handler.killed = True
-	print('Goodbye!')
-	sys.exit()
+	try:
+		client.run()
+	except (KeyboardInterrupt, SystemExit):
+		client.logout()
+		client.queue_handler.killed = True
+		client.logger.database_handler.killed = True
+		print('Goodbye!')
+		sys.exit()
